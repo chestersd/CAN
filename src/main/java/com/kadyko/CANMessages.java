@@ -2,7 +2,6 @@ package com.kadyko;
 
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
-
 import java.util.Arrays;
 import java.util.List;
 
@@ -22,7 +21,7 @@ public class CANMessages {
         public int id;        // 29-битный идентификатор сообщения
         public byte msgType;  // Тип сообщения (стандартный или расширенный)
         public byte length;   // Длина сообщения в байтах
-        public short[] data = new short[8];  // Данные сообщения
+        public byte[] data = new byte[8];  // Данные сообщения (максимум 8 байт)
 
         @Override
         protected List<String> getFieldOrder() {
@@ -31,25 +30,29 @@ public class CANMessages {
     }
 
     // Идентификаторы сообщений
-    private static final int[] messageIDs = {
-            0x18FEEE00,  // Сообщение 1
-            0x0CF00400,  // Сообщение 2
-            0x18FEF559,  // Сообщение 3
-            0x18FEF600   // Сообщение 4
-    };
+    private static final int COOLANT_TEMP_ID = 0x18FEEE00;
+    private static final int ENGINE_SPEED_ID = 0x0CF00400;
+    private static final int AMBIENT_TEMP_ID = 0x18FEF559;
+    private static final int INTAKE_TEMP_ID = 0x18FEF600;
 
     // Параметры CAN-шины
     private static final int PCAN_USBBUS1 = 0x51;
     private static final int PCAN_BAUD_250K = 0x011C;
     private static final byte PCAN_MESSAGE_EXTENDED = 0x02;
 
-    // Переменные для передачи данных
-    private static int coolantTemperature = 15;
-    private static int engineSpeed = 0;
-    private static int ambientAirTemperature = -40;
-    private static int intakeManifoldTemperature = -40;
-    private static boolean isSending = false;
+    // Значения параметров
+    private int coolantTemperature = 20;
+    private int engineSpeed = 300;
+    private int ambientAirTemperature = 20;
+    private int intakeManifoldTemperature = 0;
+    private boolean isSending = false;
     private Thread sendThread;
+
+    // Активные состояния параметров
+    private boolean isCoolantTempActive = true;
+    private boolean isEngineSpeedActive = true;
+    private boolean isAmbientAirTempActive = true;
+    private boolean isIntakeManifoldTempActive = true;
 
     // Инициализация адаптера
     public CANMessages() {
@@ -69,89 +72,60 @@ public class CANMessages {
         isSending = false;
         if (sendThread != null) {
             try {
-                sendThread.join();
+                sendThread.wait();
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
     }
 
-    // Обновление значений
+    // Методы для обновления значений и состояния параметров
     public void updateCoolantTemperature(int temperature) {
         coolantTemperature = temperature;
     }
 
     public void updateEngineSpeed(int speed) {
-        engineSpeed = speed;
+        engineSpeed = speed * 8;
     }
 
     public void updateAmbientAirTemperature(int temperature) {
-        ambientAirTemperature = temperature;
+        ambientAirTemperature = (temperature + 273) * 32;
     }
 
     public void updateIntakeManifoldTemperature(int temperature) {
         intakeManifoldTemperature = temperature;
     }
 
+    public void setCoolantTempActive(boolean active) {
+        isCoolantTempActive = active;
+    }
+
+    public void setEngineSpeedActive(boolean active) {
+        isEngineSpeedActive = active;
+    }
+
+    public void setAmbientAirTempActive(boolean active) {
+        isAmbientAirTempActive = active;
+    }
+
+    public void setIntakeManifoldTempActive(boolean active) {
+        isIntakeManifoldTempActive = active;
+    }
+
     // Метод для отправки данных в CAN-шину
     private void sendData() {
         while (isSending) {
-            for (int id : messageIDs) {
-                TPCANMsg msg = new TPCANMsg();
-                msg.id = id;
-                msg.msgType = PCAN_MESSAGE_EXTENDED;
-                msg.length = 8;
-
-                if (msg.id == 0x18FEEE00) {
-                    msg.data[0] = (byte) (coolantTemperature + 40);
-                    msg.data[1] = 0;
-                    msg.data[2] = 0;
-                    msg.data[3] = 0;
-                    msg.data[4] = 0;
-                    msg.data[5] = 25;
-                    msg.data[6] = 0;
-                    msg.data[7] = 0;
-                } else if (msg.id == 0x0CF00400) {
-                    msg.data[0] = 0;
-                    msg.data[1] = 0;
-                    msg.data[2] = 0;
-                    msg.data[3] = (byte) (engineSpeed >> 8);
-                    msg.data[4] = (byte) (engineSpeed & 0xFF);
-                    msg.data[5] = 0;
-                    msg.data[6] = 0;
-                    msg.data[7] = 0;
-                } else if (msg.id == 0x18FEF559) {
-                    msg.data[0] = 0;
-                    msg.data[1] = 0;
-                    msg.data[2] = 0;
-                    msg.data[3] = (byte) (engineSpeed >> 8); //???
-                    msg.data[4] = (byte) (engineSpeed & 0xFF); //???
-                    msg.data[5] = 0;
-                    msg.data[6] = 0;
-                    msg.data[7] = 0;
-                } else if (msg.id == 0x18FEF600) {
-                    msg.data[0] = 128;
-                    msg.data[1] = 128;
-                    msg.data[2] = (byte) (intakeManifoldTemperature + 40);
-                    msg.data[3] = 128;
-                    msg.data[4] = 128;
-                    msg.data[5] = 128;
-                    msg.data[6] = 128;
-                    msg.data[7] = 128;
-                }
-//                msg.data[0] = (byte) (coolantTemperature + 40);
-//                msg.data[1] = (byte) (engineSpeed >> 8);
-//                msg.data[2] = (byte) (engineSpeed & 0xFF);
-//                msg.data[3] = (byte) (ambientAirTemperature + 40);
-//                msg.data[4] = (byte) (intakeManifoldTemperature + 40);
-//                msg.data[5] = 19;
-//                msg.data[6] = 0;
-//                msg.data[7] = 0;
-
-                int result = PCANBasic.INSTANCE.CAN_Write(PCAN_USBBUS1, msg);
-                if (result != 0) {
-                    System.out.println("Ошибка при отправке сообщения ID = 0x" + Integer.toHexString(id).toUpperCase());
-                }
+            if (isCoolantTempActive) {
+                sendCANMessage(COOLANT_TEMP_ID, isCoolantTempActive ? new byte[]{(byte) (coolantTemperature + 40), 0, 0, 0, 0, 25, 0, 0} : new byte[8]);
+            }
+            if (isEngineSpeedActive) {
+                sendCANMessage(ENGINE_SPEED_ID, isEngineSpeedActive ? new byte[]{0, 0, 0, (byte) (engineSpeed & 0xFF), (byte) (engineSpeed >> 8), 0,  0, 0} : new byte[8]);
+            }
+            if (isAmbientAirTempActive) {
+                sendCANMessage(AMBIENT_TEMP_ID, isAmbientAirTempActive ? new byte[]{0, 0, 0, (byte) ((ambientAirTemperature) & 0xFF), (byte) ((ambientAirTemperature) >> 8), 0, 0, 0} : new byte[8]);
+            }
+            if (isIntakeManifoldTempActive) {
+                sendCANMessage(INTAKE_TEMP_ID, isIntakeManifoldTempActive ? new byte[]{(byte) 0x80, (byte) 0x80, (byte) (intakeManifoldTemperature + 40), (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80} : new byte[8]);
             }
 
             try {
@@ -163,5 +137,20 @@ public class CANMessages {
 
         PCANBasic.INSTANCE.CAN_Uninitialize(PCAN_USBBUS1);
         System.out.println("CAN-адаптер был деинициализирован.");
+    }
+
+    // Отправка сообщения в CAN-шину
+    private void sendCANMessage(int id, byte[] data) {
+
+        TPCANMsg msg = new TPCANMsg();
+        msg.id = id;
+        msg.msgType = PCAN_MESSAGE_EXTENDED;
+        msg.length = 8;
+        msg.data = data;
+
+        int result = PCANBasic.INSTANCE.CAN_Write(PCAN_USBBUS1, msg);
+        if (result != 0) {
+            System.out.println("Ошибка при отправке сообщения ID = 0x" + Integer.toHexString(id).toUpperCase());
+        }
     }
 }
